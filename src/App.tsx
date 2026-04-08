@@ -38,6 +38,8 @@ export default function App() {
   const [logs, setLogs] = useState<{ type: "BLUE" | "RED" | "BLACK" | "SYSTEM"; message: string; timestamp: string }[]>([]);
   const [missionSteps, setMissionSteps] = useState<any[]>([]);
   const [finalResult, setFinalResult] = useState<any>(null);
+  const [currentScreenshot, setCurrentScreenshot] = useState<string | null>(null);
+  const [currentUrl, setCurrentUrl] = useState<string>("https://www.google.com");
   const [orchestrator, setOrchestrator] = useState<Orchestrator | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -46,6 +48,15 @@ export default function App() {
     if (mistralKey) {
       setOrchestrator(new Orchestrator(mistralKey));
     }
+    
+    // Initial screenshot
+    fetch("/api/browser", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "screenshot", params: {} })
+    }).then(res => res.json()).then(data => {
+      if (data.success) setCurrentScreenshot(`data:image/png;base64,${data.data}`);
+    }).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -83,9 +94,23 @@ export default function App() {
       
       setMissionSteps(result.steps || []);
       setFinalResult(result.finalResult);
+
+      // Update screenshot if available from the last step
+      const lastStep = result.steps?.[result.steps.length - 1];
+      if (lastStep?.result?.result?.screenshot) {
+        setCurrentScreenshot(`data:image/png;base64,${lastStep.result.result.screenshot}`);
+        if (lastStep.step.toLowerCase().includes("navigate to")) {
+          const urlMatch = lastStep.step.match(/https?:\/\/[^\s]+/);
+          if (urlMatch) setCurrentUrl(urlMatch[0]);
+        }
+      }
       
       if (result.success) {
         addLog("SYSTEM", "Mission accomplished successfully. Identity consistency maintained.");
+      } else if (result.finalResult?.action === "GEMINI_ULTIMATE_FALLBACK") {
+        addLog("SYSTEM", "CRITICAL FAILURE: All primary agents failed.");
+        addLog("SYSTEM", "INITIATING ULTIMATE FALLBACK: GEMINI...");
+        addLog("SYSTEM", `Gemini Resolution: ${result.finalResult.status}`);
       } else {
         addLog("BLACK", "Mission encountered critical failure. Fallback executed.");
       }
@@ -97,7 +122,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-blue-500/30">
+    <div className="h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-blue-500/30 flex flex-col overflow-hidden">
       {/* Header */}
       <header className="border-b border-zinc-800 bg-zinc-900/50 backdrop-blur-md sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
@@ -125,190 +150,193 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column: Profile & Input */}
-        <div className="lg:col-span-4 space-y-6">
-          {/* Profile Card */}
-          <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-xl overflow-hidden relative">
-            <div className="absolute top-0 right-0 p-4 opacity-5">
-              <User className="w-24 h-24" />
+      <main className="flex-1 flex overflow-hidden">
+        {/* Left Panel: Live Browser Viewport */}
+        <div className="flex-1 bg-zinc-900 flex flex-col border-r border-zinc-800">
+          {/* Browser Chrome */}
+          <div className="h-12 bg-zinc-800/50 border-b border-zinc-700 flex items-center px-4 gap-4">
+            <div className="flex gap-1.5">
+              <div className="w-3 h-3 rounded-full bg-red-500/50" />
+              <div className="w-3 h-3 rounded-full bg-yellow-500/50" />
+              <div className="w-3 h-3 rounded-full bg-green-500/50" />
             </div>
-            <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-              <Database className="w-4 h-4" />
-              Active Profile
-            </h2>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center py-2 border-b border-zinc-800/50">
-                <span className="text-xs text-zinc-500">Identity</span>
-                <span className="text-sm font-medium text-blue-400">{profile.name}</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-zinc-800/50">
-                <span className="text-xs text-zinc-500">Occupation</span>
-                <span className="text-sm font-medium text-zinc-300">{profile.job_title}</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-zinc-800/50">
-                <span className="text-xs text-zinc-500">Income</span>
-                <span className="text-sm font-medium text-green-400">{profile.income}</span>
-              </div>
-              <div className="flex justify-between items-center py-2">
-                <span className="text-xs text-zinc-500">Location</span>
-                <span className="text-sm font-medium text-zinc-300">{profile.location.split(',')[1]}</span>
-              </div>
+            <div className="flex-1 max-w-2xl bg-zinc-950 border border-zinc-700 rounded-md h-8 flex items-center px-3 gap-2">
+              <Shield className="w-3 h-3 text-zinc-500" />
+              <span className="text-xs text-zinc-400 truncate">{currentUrl}</span>
             </div>
-            <button 
-              onClick={() => setIsEditModalOpen(true)}
-              className="w-full mt-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
-            >
-              <Settings className="w-3 h-3" />
-              Edit Profile Brain
-            </button>
-          </section>
+            <div className="flex items-center gap-3 text-zinc-500">
+              <button 
+                onClick={async () => {
+                  const response = await fetch("/api/browser", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "screenshot", params: {} })
+                  });
+                  if (response.ok) {
+                    const data = await response.json();
+                    setCurrentScreenshot(`data:image/png;base64,${data.data}`);
+                  }
+                }}
+                className="p-1 hover:bg-zinc-700 rounded transition-colors"
+              >
+                <History className="w-4 h-4" />
+              </button>
+              <button onClick={() => setIsSettingsModalOpen(true)} className="p-1 hover:bg-zinc-700 rounded transition-colors">
+                <Settings className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
 
-          <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-xl">
-            <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-              <Terminal className="w-4 h-4" />
-              Survey Command
-            </h2>
-            <div className="space-y-4">
-              <div className="flex items-center gap-4 p-3 bg-zinc-950 border border-zinc-800 rounded-xl">
-                <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Vision Mode:</span>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input 
-                    type="radio" 
-                    name="vision-mode" 
-                    value="on" 
-                    checked={visionMode === "on"}
-                    onChange={(e) => setVisionMode(e.target.value)}
-                    className="w-4 h-4 accent-blue-500"
-                  />
-                  <span className="text-xs font-medium">ON</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input 
-                    type="radio" 
-                    name="vision-mode" 
-                    value="off" 
-                    checked={visionMode === "off"}
-                    onChange={(e) => setVisionMode(e.target.value)}
-                    className="w-4 h-4 accent-zinc-500"
-                  />
-                  <span className="text-xs font-medium">OFF</span>
-                </label>
+          {/* Browser Content */}
+          <div className="flex-1 relative overflow-hidden bg-zinc-950 flex items-center justify-center p-8">
+            {currentScreenshot ? (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="relative w-full h-full max-w-5xl shadow-2xl rounded-lg overflow-hidden border border-zinc-800"
+              >
+                <img 
+                  src={currentScreenshot} 
+                  alt="Browser Viewport" 
+                  className="w-full h-full object-contain bg-white"
+                  referrerPolicy="no-referrer"
+                />
+                {isMissionRunning && (
+                  <div className="absolute inset-0 bg-blue-500/5 backdrop-blur-[1px] flex items-center justify-center">
+                    <div className="bg-zinc-900/90 border border-blue-500/30 px-4 py-2 rounded-full flex items-center gap-3 shadow-2xl">
+                      <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+                      <span className="text-xs font-bold text-blue-400 uppercase tracking-widest">Agent Controlling Page...</span>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            ) : (
+              <div className="text-center space-y-4 max-w-md">
+                <div className="w-20 h-20 bg-zinc-900 rounded-2xl flex items-center justify-center mx-auto border border-zinc-800">
+                  <Layout className="w-10 h-10 text-zinc-700" />
+                </div>
+                <h3 className="text-lg font-bold text-zinc-400">No Active Session</h3>
+                <p className="text-sm text-zinc-500">Initiate a mission to start the server-side browser and see the live navigation view.</p>
               </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right Panel: Sidebar Extension UI */}
+        <div className="w-[400px] bg-zinc-950 flex flex-col border-l border-zinc-800 shadow-2xl z-20">
+          {/* Sidebar Header */}
+          <div className="p-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Brain className="w-5 h-5 text-blue-500" />
+              <span className="font-bold text-sm">SurveyBrain Sidebar</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="px-2 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded text-[10px] font-bold text-blue-400 uppercase">v1.0</div>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-thin scrollbar-thumb-zinc-800">
+            {/* Active Profile Mini-Card */}
+            <section className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-2 opacity-10">
+                <User className="w-12 h-12" />
+              </div>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-1.5">
+                  <Database className="w-3 h-3" />
+                  Identity
+                </h2>
+                <button onClick={() => setIsEditModalOpen(true)} className="text-[10px] text-blue-400 hover:underline">Edit</button>
+              </div>
+              <div className="space-y-1">
+                <div className="text-sm font-bold text-zinc-200">{profile.name}</div>
+                <div className="text-xs text-zinc-500">{profile.job_title}</div>
+              </div>
+            </section>
+
+            {/* Command Input */}
+            <section className="space-y-3">
+              <h2 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-1.5">
+                <Terminal className="w-3 h-3" />
+                Command
+              </h2>
               <textarea
                 value={userInput}
                 onChange={(e) => setUserInput(e.target.value)}
-                placeholder="e.g., 'Complete the demographic section of this survey'"
-                className="w-full h-32 bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all resize-none placeholder:text-zinc-600"
+                placeholder="e.g., 'Navigate to google.com and search for AI news'"
+                className="w-full h-24 bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all resize-none placeholder:text-zinc-700"
               />
               <button
                 onClick={startMission}
                 disabled={isMissionRunning || !userInput.trim()}
-                className="w-full py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-all shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2"
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20"
               >
                 {isMissionRunning ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Processing Identity...
-                  </>
+                  <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
-                  <>
-                    <Play className="w-5 h-5 fill-current" />
-                    Execute Survey Mission
-                  </>
+                  <Play className="w-4 h-4 fill-current" />
                 )}
+                {isMissionRunning ? "Executing..." : "Start Mission"}
               </button>
-            </div>
-          </section>
-        </div>
+            </section>
 
-        {/* Right Column: Logs & Execution */}
-        <div className="lg:col-span-8 space-y-6">
-          <section className="bg-zinc-900 border border-zinc-800 rounded-2xl flex flex-col h-[600px] shadow-xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/80 backdrop-blur-sm">
-              <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
-                <Layout className="w-4 h-4" />
-                Mission Log & Identity Verification
+            {/* Logs */}
+            <section className="flex-1 flex flex-col min-h-[300px]">
+              <h2 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                <History className="w-3 h-3" />
+                Activity
               </h2>
-              <div className="flex gap-2">
-                <div className="w-3 h-3 rounded-full bg-zinc-800" />
-                <div className="w-3 h-3 rounded-full bg-zinc-800" />
-                <div className="w-3 h-3 rounded-full bg-zinc-800" />
-              </div>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-6 space-y-4 font-mono text-xs scrollbar-thin scrollbar-thumb-zinc-800">
-              <AnimatePresence mode="popLayout">
-                {logs.length === 0 && (
-                  <div className="h-full flex flex-col items-center justify-center text-zinc-600 space-y-4">
-                    <History className="w-12 h-12 opacity-20" />
-                    <p>Waiting for mission initiation...</p>
-                  </div>
+              <div className="flex-1 bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 space-y-3 font-mono text-[10px] overflow-y-auto max-h-[400px]">
+                {logs.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-zinc-700 italic">No activity logged</div>
+                ) : (
+                  logs.map((log, i) => (
+                    <div key={i} className="flex gap-2">
+                      <span className={`shrink-0 font-bold ${
+                        log.type === "BLUE" ? "text-blue-400" :
+                        log.type === "RED" ? "text-red-400" :
+                        log.type === "BLACK" ? "text-zinc-400" :
+                        "text-zinc-600"
+                      }`}>
+                        {log.type.charAt(0)}:
+                      </span>
+                      <span className="text-zinc-400 leading-tight">{log.message}</span>
+                    </div>
+                  ))
                 )}
-                {logs.map((log, i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="flex gap-4 group"
-                  >
-                    <span className="text-zinc-600 shrink-0 select-none">[{log.timestamp}]</span>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 h-fit ${
-                      log.type === "BLUE" ? "bg-blue-500/20 text-blue-400" :
-                      log.type === "RED" ? "bg-red-500/20 text-red-400" :
-                      log.type === "BLACK" ? "bg-zinc-500/20 text-zinc-400" :
-                      "bg-zinc-800 text-zinc-500"
-                    }`}>
-                      {log.type}
-                    </span>
-                    <span className="text-zinc-300 leading-relaxed">{log.message}</span>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-              <div ref={logEndRef} />
-            </div>
+                <div ref={logEndRef} />
+              </div>
+            </section>
 
-            {/* Execution Steps Visualization */}
+            {/* Mission Steps */}
             {missionSteps.length > 0 && (
-              <div className="p-6 border-t border-zinc-800 bg-zinc-950/50">
-                <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-4">Identity Mapping Steps</h3>
-                <div className="flex flex-wrap gap-3">
+              <section className="space-y-3">
+                <h2 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-1.5">
+                  <Zap className="w-3 h-3" />
+                  Steps
+                </h2>
+                <div className="space-y-2">
                   {missionSteps.map((step, i) => (
-                    <motion.div
-                      key={i}
-                      initial={{ scale: 0.9, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      transition={{ delay: i * 0.1 }}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${
-                        step.result.success 
-                          ? "bg-green-500/5 border-green-500/20 text-green-400" 
-                          : "bg-red-500/5 border-red-500/20 text-red-400"
-                      }`}
-                    >
-                      {step.result.success ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
-                      <span className="text-xs font-medium truncate max-w-[150px]">{step.step}</span>
-                    </motion.div>
+                    <div key={i} className="flex items-center gap-2 p-2 bg-zinc-900 border border-zinc-800 rounded-lg">
+                      {step.result.success ? <CheckCircle2 className="w-3 h-3 text-green-500" /> : <XCircle className="w-3 h-3 text-red-500" />}
+                      <span className="text-[10px] text-zinc-400 truncate">{step.step}</span>
+                    </div>
                   ))}
                 </div>
-              </div>
+              </section>
             )}
-          </section>
+          </div>
 
-          {finalResult && (
-            <motion.section
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-xl"
-            >
-              <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-green-400" />
-                Final Mission Result
-              </h2>
-              <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-800 text-sm text-zinc-300 font-mono">
-                {typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult, null, 2)}
-              </div>
-            </motion.section>
-          )}
+          {/* Sidebar Footer */}
+          <div className="p-4 border-t border-zinc-800 bg-zinc-900/30 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-[10px] text-zinc-500">
+              <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+              System Ready
+            </div>
+            <button onClick={() => setIsSettingsModalOpen(true)} className="p-1.5 text-zinc-500 hover:text-white transition-colors">
+              <Settings className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </main>
 

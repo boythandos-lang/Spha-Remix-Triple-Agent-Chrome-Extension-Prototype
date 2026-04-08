@@ -1,24 +1,29 @@
 /**
  * Vision Integration
- * Handles screenshot capture from the Chrome extension.
+ * Handles screenshot capture from the server-side browser.
  */
 export class Vision {
   /**
-   * Captures the current tab's screenshot.
-   * In a real extension, this would use chrome.tabs.captureVisibleTab.
+   * Captures the current tab's screenshot by calling the server-side Browser API.
    */
   async captureScreenshot(): Promise<string> {
-    console.log("Vision: Capturing screenshot...");
+    console.log("Vision: Capturing real screenshot...");
     
-    // In a real extension:
-    // return new Promise((resolve) => {
-    //   chrome.tabs.captureVisibleTab(null, { format: "png" }, (dataUrl) => {
-    //     resolve(dataUrl);
-    //   });
-    // });
+    try {
+      const response = await fetch("/api/browser", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "screenshot", params: {} })
+      });
 
-    // For the prototype, we return a realistic placeholder image
-    // In a real extension, this would be a base64 string from captureVisibleTab
-    return "https://picsum.photos/seed/survey/1280/720";
+      if (!response.ok) throw new Error("Screenshot failed");
+
+      const data = await response.json();
+      return `data:image/png;base64,${data.data}`;
+    } catch (error) {
+      console.error("Vision Error:", error);
+      // Fallback to placeholder if browser API fails
+      return "https://picsum.photos/seed/survey/1280/720";
+    }
   }
 }

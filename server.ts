@@ -3,17 +3,28 @@ import bodyParser from "body-parser";
 import cors from "cors";
 import path from "path";
 import { createServer as createViteServer } from "vite";
+import { chromium, Browser, Page } from "playwright";
 
-async function runVisionAgent(task: string, imageBase64: string) {
-  console.log("Vision Agent: Processing task with image...", task);
-  // ⚠️ Placeholder (vision-ready structure)
-  // In a real scenario, this would call Mistral Pixtral or Google Gemini Vision
-  return {
-    actions: [
-      { type: "click", text: "Next", selector: ".next-button" }
-    ],
-    reasoning: "Visual analysis suggests the 'Next' button is the primary path forward."
-  };
+let browser: Browser | null = null;
+let page: Page | null = null;
+
+async function getBrowser() {
+  if (!browser) {
+    browser = await chromium.launch({ headless: true });
+  }
+  return browser;
+}
+
+async function getPage() {
+  const b = await getBrowser();
+  if (!page) {
+    const context = await b.newContext({
+      viewport: { width: 1280, height: 720 },
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+    });
+    page = await context.newPage();
+  }
+  return page;
 }
 
 async function startServer() {
@@ -23,22 +34,49 @@ async function startServer() {
   app.use(cors());
   app.use(bodyParser.json({ limit: '50mb' }));
 
-  // API Routes
-  app.post("/api/agent", async (req, res) => {
-    const { agent, messages, image } = req.body;
+  // Browser Control API
+  app.post("/api/browser", async (req, res) => {
+    const { action, params } = req.body;
+    console.log(`Browser API: Executing ${action}`, params);
 
-    if (image) {
-      const result = await runVisionAgent(messages?.[0]?.content || "No task provided", image);
-      return res.json({ output: JSON.stringify(result) });
-    }
+    try {
+      const p = await getPage();
 
-    // Default response for non-vision tasks (simulated)
-    res.json({ 
-      output: JSON.stringify({ 
+      switch (action) {
+        case "navigate":
+          await p.goto(params.url, { waitUntil: "networkidle" });
+          break;
+        case "click":
+          await p.click(params.selector, { timeout: 5000 });
+          break;
+        case "type":
+          await p.fill(params.selector, params.text, { timeout: 5000 });
+          break;
+        case "scrape":
+          const content = await p.content();
+          return res.json({ success: true, data: content });
+        case "screenshot":
+          const buffer = await p.screenshot({ type: "png" });
+          return res.json({ success: true, data: buffer.toString("base64") });
+        default:
+          return res.status(400).json({ success: false, error: "Unknown action" });
+      }
+
+      // After navigation/click/type, return new state
+      const newContent = await p.content();
+      const screenshot = await p.screenshot({ type: "png" });
+      
+      res.json({ 
         success: true, 
-        message: `Agent ${agent} processed the request.` 
-      }) 
-    });
+        data: {
+          dom: newContent,
+          screenshot: screenshot.toString("base64")
+        }
+      });
+    } catch (error) {
+      console.error("Browser API Error:", error);
+      res.status(500).json({ success: false, error: String(error) });
+    }
   });
 
   // Vite middleware for development
