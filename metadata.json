@@ -1,0 +1,5 @@
+{
+  "name": "Remix: Triple-Agent Chrome Extension Prototype",
+  "description": "A Chrome Extension prototype featuring a triple-agent system: Blue (Reasoning), RED (Execution), and Black (Fallback).",
+  "requestFramePermissions": []
+}
